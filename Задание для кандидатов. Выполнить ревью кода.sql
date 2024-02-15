@@ -1,21 +1,32 @@
 create procedure syn.usp_ImportFileCustomerSeasonal
 	@ID_Record int
-AS
+-- Ключевые слова, названия системных функций и все операторы пишутся в нижнем регистре
+as
 set nocount on
 begin
+	-- По общему правилу, переменные объявляются один раз
 	declare @RowCount int = (select count(*) from syn.SA_CustomerSeasonal)
-	declare @ErrorMessage varchar(max)
+	-- Рекомендуется при объявлении типов не использовать длину поля "max"
+	,@ErrorMessage varchar(8000)
 
 -- Проверка на корректность загрузки
 	if not exists (
-	select 1
-	from syn.ImportFile as f
-	where f.ID = @ID_Record
-		and f.FlagLoaded = cast(1 as bit)
+		-- В условных операторах весь блок кода смещается на 1 отступ
+		select 1
+		/*
+			При наименовании алиаса используются первые заглавные буквы каждого слова в названии объекта, 
+			которому дают алиас. В случае, если алиас представляет собой системное слово, 
+			добавляем первую согласную букву после заглавной из первого слова
+		*/
+		from syn.ImportFile as imf
+		where imf.ID = @ID_Record
+			and imf.FlagLoaded = cast(1 as bit)
 	)
 		begin
 			set @ErrorMessage = 'Ошибка при загрузке файла, проверьте корректность данных'
 			raiserror(@ErrorMessage, 3, 1)
+			
+			-- Пустая строка перед "return"
 			return
 		end
 
@@ -29,13 +40,16 @@ begin
 		,c_dist.ID as ID_dbo_CustomerDistributor
 		,cast(isnull(cs.FlagActive, 0) as bit) as FlagActive
 	into #CustomerSeasonal
-	from syn.SA_CustomerSeasonal cs
-		join dbo.Customer as c on c.UID_DS = cs.UID_DS_Customer
+	-- Пропущен оператор алиаса
+	from syn.SA_CustomerSeasonal as cs
+		-- Все виды join-ов указываются явно
+		left join dbo.Customer as c on c.UID_DS = cs.UID_DS_Customer
 			and c.ID_mapping_DataSource = 1
-		join dbo.Season as s on s.Name = cs.Season
-		join dbo.Customer as c_dist on c_dist.UID_DS = cs.UID_DS_CustomerDistributor
+		left join dbo.Season as s on s.Name = cs.Season
+		left join dbo.Customer as c_dist on c_dist.UID_DS = cs.UID_DS_CustomerDistributor
 			and c_dist.ID_mapping_DataSource = 1
-		join syn.CustomerSystemType as cst on cs.CustomerSystemType = cst.Name
+		-- Сперва указывается поле присоединяемой таблицы
+		left join syn.CustomerSystemType as cst on cst.Name = cs.CustomerSystemType
 	where try_cast(cs.DateBegin as date) is not null
 		and try_cast(cs.DateEnd as date) is not null
 		and try_cast(isnull(cs.FlagActive, 0) as bit) is not null
@@ -45,21 +59,32 @@ begin
 	select
 		cs.*
 		,case
-			when c.ID is null then 'UID клиента отсутствует в справочнике "Клиент"'
-			when c_dist.ID is null then 'UID дистрибьютора отсутствует в справочнике "Клиент"'
-			when s.ID is null then 'Сезон отсутствует в справочнике "Сезон"'
-			when cst.ID is null then 'Тип клиента отсутствует в справочнике "Тип клиента"'
-			when try_cast(cs.DateBegin as date) is null then 'Невозможно определить Дату начала'
-			when try_cast(cs.DateEnd as date) is null then 'Невозможно определить Дату окончания'
-			when try_cast(isnull(cs.FlagActive, 0) as bit) is null then 'Невозможно определить Активность'
+			when c.ID is null
+				-- При написании конструкции с "case", необходимо, чтобы "when" был под "case" с 1 отступом, "then" с 2 отступами
+				then 'UID клиента отсутствует в справочнике "Клиент"'
+			when c_dist.ID is null 
+				then 'UID дистрибьютора отсутствует в справочнике "Клиент"'
+			when s.ID is null 
+				then 'Сезон отсутствует в справочнике "Сезон"'
+			when cst.ID is null 
+				then 'Тип клиента отсутствует в справочнике "Тип клиента"'
+			when try_cast(cs.DateBegin as date) is null 
+				then 'Невозможно определить Дату начала'
+			when try_cast(cs.DateEnd as date) is null 
+				then 'Невозможно определить Дату окончания'
+			when try_cast(isnull(cs.FlagActive, 0) as bit) is null 
+				then 'Невозможно определить Активность'
 		end as Reason
 	into #BadInsertedRows
 	from syn.SA_CustomerSeasonal as cs
-	left join dbo.Customer as c on c.UID_DS = cs.UID_DS_Customer
-		and c.ID_mapping_DataSource = 1
-	left join dbo.Customer as c_dist on c_dist.UID_DS = cs.UID_DS_CustomerDistributor and c_dist.ID_mapping_DataSource = 1
-	left join dbo.Season as s on s.Name = cs.Season
-	left join syn.CustomerSystemType as cst on cst.Name = cs.CustomerSystemType
+		-- Все виды пересечений пишутся с 1 отступом
+		left join dbo.Customer as c on c.UID_DS = cs.UID_DS_Customer
+			and c.ID_mapping_DataSource = 1
+		left join dbo.Customer as c_dist on c_dist.UID_DS = cs.UID_DS_CustomerDistributor 
+			-- Если есть "and", то он переносится на следующую строку и выравнивается на 1 табуляцию от "join" 
+			and c_dist.ID_mapping_DataSource = 1
+		left join dbo.Season as s on s.Name = cs.Season
+		left join syn.CustomerSystemType as cst on cst.Name = cs.CustomerSystemType
 	where c.ID is null
 		or c_dist.ID is null
 		or s.ID is null
@@ -69,7 +94,8 @@ begin
 		or try_cast(isnull(cs.FlagActive, 0) as bit) is null
 
 	-- Обработка данных из файла
-	merge into syn.CustomerSeasonal as cs
+	-- Перед названием таблицы, в которую осуществляется  merge, into не указывается
+	merge syn.CustomerSeasonal as cs
 	using (
 		select
 			cs_temp.ID_dbo_Customer
@@ -83,23 +109,47 @@ begin
 	) as s on s.ID_dbo_Customer = cs.ID_dbo_Customer
 		and s.ID_Season = cs.ID_Season
 		and s.DateBegin = cs.DateBegin
-	when matched
-		and t.ID_CustomerSystemType <> s.ID_CustomerSystemType then
+	-- "then" записывается на одной строке с "when", независимо от наличия дополнительных условий
+	when matched and t.ID_CustomerSystemType <> s.ID_CustomerSystemType then
 		update
-		set ID_CustomerSystemType = s.ID_CustomerSystemType
+		set 
+			-- Перечисление всех атрибутов с новой строки
+			ID_CustomerSystemType = s.ID_CustomerSystemType
 			,DateEnd = s.DateEnd
 			,ID_dbo_CustomerDistributor = s.ID_dbo_CustomerDistributor
 			,FlagActive = s.FlagActive
 	when not matched then
-		insert (ID_dbo_Customer, ID_CustomerSystemType, ID_Season, DateBegin, DateEnd, ID_dbo_CustomerDistributor, FlagActive)
-		values (s.ID_dbo_Customer, s.ID_CustomerSystemType, s.ID_Season, s.DateBegin, s.DateEnd, s.ID_dbo_CustomerDistributor, s.FlagActive);
+		/*
+		Для повышения читаемости кода длинные условия, формулы, выражения и т.п.,
+		не умещающиеся на экране с разрешением 1366x768 должны быть разделены на несколько строк.
+		Каждый параметр с новой строки. 
+		*/
+		insert (
+			ID_dbo_Customer
+			,ID_CustomerSystemType
+			,ID_Season
+			,DateBegin
+			,DateEnd
+			,ID_dbo_CustomerDistributor
+			,FlagActive
+		)
+		values (
+			s.ID_dbo_Customer
+			,s.ID_CustomerSystemType
+			,s.ID_Season
+			,s.DateBegin
+			,s.DateEnd
+			,s.ID_dbo_CustomerDistributor
+			,s.FlagActive
+		);
 
 	-- Информационное сообщение
 	begin
 		select @ErrorMessage = concat('Обработано строк: ', @RowCount)
 		raiserror(@ErrorMessage, 1, 1)
 
-		--Формирование таблицы для отчетности
+		-- Между "--" и текстом комментария должен быть один пробел
+		-- Формирование таблицы для отчетности
 		select top 100
 			bir.Season as 'Сезон'
 			,bir.UID_DS_Customer as 'UID Клиента'
@@ -108,7 +158,8 @@ begin
 			,bir.UID_DS_CustomerDistributor as 'UID Дистрибьютора'
 			,bir.CustomerDistributor as 'Дистрибьютор'
 			,isnull(format(try_cast(bir.DateBegin as date), 'dd.MM.yyyy', 'ru-RU'), bir.DateBegin) as 'Дата начала'
-			,isnull(format(try_cast(birDateEnd as date), 'dd.MM.yyyy', 'ru-RU'), bir.DateEnd) as 'Дата окончания'
+			-- Некорректная ссылка на поле из таблицы "BadInsertedRows"
+			,isnull(format(try_cast(bir.DateEnd as date), 'dd.MM.yyyy', 'ru-RU'), bir.DateEnd) as 'Дата окончания'
 			,bir.FlagActive as 'Активность'
 			,bir.Reason as 'Причина'
 		from #BadInsertedRows as bir
